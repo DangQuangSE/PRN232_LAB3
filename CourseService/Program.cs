@@ -14,6 +14,8 @@ using System.Text;
 using Asp.Versioning;
 using FluentValidation;
 using Serilog;
+using Polly;
+using Polly.Extensions.Http;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -92,13 +94,51 @@ try
     });
 
     // Register gRPC Client for Student Service
-    var studentServiceUrl = Environment.GetEnvironmentVariable("STUDENT_SERVICE_URL") 
-                            ?? builder.Configuration["GrpcClients:StudentService"] 
+    var studentServiceUrl = Environment.GetEnvironmentVariable("STUDENT_SERVICE_URL")
+                            ?? builder.Configuration["GrpcClients:StudentService"]
                             ?? "http://localhost:5001";
-    
+
+    // Polly policies for gRPC client resilience
+    var retryPolicy = HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .WaitAndRetryAsync(
+            retryCount: 3,
+            sleepDurationProvider: attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)),
+            onRetry: (outcome, timespan, attempt, _) =>
+            {
+                Log.Warning("gRPC call to StudentService failed. Retry {Attempt} in {Delay}s. Error: {Error}",
+                    attempt, timespan.TotalSeconds, outcome.Exception?.Message ?? outcome.Result?.StatusCode.ToString());
+            });
+
+    var circuitBreakerPolicy = HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 5,
+            durationOfBreak: TimeSpan.FromSeconds(30),
+            onBreak: (outcome, duration) =>
+            {
+                Log.Error("Circuit breaker OPENED for StudentService. Will pause for {Duration}s. Error: {Error}",
+                    duration.TotalSeconds, outcome.Exception?.Message ?? outcome.Result?.StatusCode.ToString());
+            },
+            onReset: () => Log.Information("Circuit breaker CLOSED. StudentService is back."),
+            onHalfOpen: () => Log.Warning("Circuit breaker HALF-OPEN. Testing StudentService..."));
+
     builder.Services.AddGrpcClient<StudentGrpc.StudentGrpcClient>(options =>
     {
         options.Address = new Uri(studentServiceUrl);
+    })
+    .AddPolicyHandler(retryPolicy)
+    .AddPolicyHandler(circuitBreakerPolicy);
+
+    // Register Redis Cache
+    var redisUrl = Environment.GetEnvironmentVariable("REDIS_URL")
+                   ?? builder.Configuration["Redis:ConnectionString"]
+                   ?? "localhost:6379";
+
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisUrl;
+        options.InstanceName = "lms_course:";
     });
 
     var connectionString = Environment.GetEnvironmentVariable("DB_CONNECTION_STRING") 

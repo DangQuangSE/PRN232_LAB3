@@ -9,6 +9,8 @@ using PRN232.LMSSystem.Grpc;
 using GrpcStudentResponse = PRN232.LMSSystem.Grpc.StudentResponse;
 using System.Linq.Expressions;
 using Grpc.Core;
+using Microsoft.Extensions.Caching.Distributed;
+using System.Text.Json;
 
 namespace PRN232.LMSSystem.CourseService.Services;
 
@@ -16,11 +18,35 @@ public class EnrollmentService : IEnrollmentService
 {
     private readonly IEnrollmentRepository _enrollmentRepository;
     private readonly StudentGrpc.StudentGrpcClient _grpcClient;
+    private readonly IDistributedCache _cache;
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
-    public EnrollmentService(IEnrollmentRepository enrollmentRepository, StudentGrpc.StudentGrpcClient grpcClient)
+    public EnrollmentService(
+        IEnrollmentRepository enrollmentRepository,
+        StudentGrpc.StudentGrpcClient grpcClient,
+        IDistributedCache cache)
     {
         _enrollmentRepository = enrollmentRepository;
         _grpcClient = grpcClient;
+        _cache = cache;
+    }
+
+    private static string StudentCacheKey(int studentId) => $"student:{studentId}";
+
+    private async Task<GrpcStudentResponse?> GetStudentFromCacheAsync(int studentId)
+    {
+        var json = await _cache.GetStringAsync(StudentCacheKey(studentId));
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GrpcStudentResponse>(json);
+    }
+
+    private async Task SetStudentCacheAsync(GrpcStudentResponse student)
+    {
+        var json = JsonSerializer.Serialize(student);
+        await _cache.SetStringAsync(
+            StudentCacheKey(student.StudentId),
+            json,
+            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl });
     }
 
     private async Task<Dictionary<int, GrpcStudentResponse>> FetchStudentsMapAsync(IEnumerable<int> studentIds)
@@ -29,19 +55,34 @@ public class EnrollmentService : IEnrollmentService
         var distinctIds = studentIds.Distinct().ToList();
         if (!distinctIds.Any()) return studentMap;
 
+        // Check cache first
+        var missIds = new List<int>();
+        foreach (var id in distinctIds)
+        {
+            var cached = await GetStudentFromCacheAsync(id);
+            if (cached != null)
+                studentMap[id] = cached;
+            else
+                missIds.Add(id);
+        }
+
+        if (!missIds.Any()) return studentMap;
+
+        // Batch gRPC call for cache misses only
         try
         {
             var grpcReq = new StudentsRequest();
-            grpcReq.StudentIds.AddRange(distinctIds);
+            grpcReq.StudentIds.AddRange(missIds);
             var grpcRes = await _grpcClient.GetStudentsByIdsAsync(grpcReq);
             foreach (var s in grpcRes.Students)
             {
                 studentMap[s.StudentId] = s;
+                await SetStudentCacheAsync(s);
             }
         }
         catch (Exception)
         {
-            // Log or fallback
+            // fallback: return whatever we got from cache
         }
         return studentMap;
     }
