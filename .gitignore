@@ -1,0 +1,67 @@
+# ==========================================
+# .NET 8 Web API - Clean Architecture & Docker
+# ==========================================
+
+# 1. Build results (File biên dịch)
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+*.log
+
+# 2. Visual Studio, VS Code & JetBrains Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.cache
+*.pdb
+*.sln.iml
+
+# 3. Environment & Secrets 
+appsettings.Development.json
+appsettings.Local.json
+appsettings.Staging.json
+appsettings.Production.json
+.env
+secrets.json
+
+!appsettings.json
+
+# 4. Testing & Code Coverage 
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage.json
+
+# 5. OS generated files 
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# 6. Database files 
+*.mdf
+*.ldf
+*.ndf
+*.sqlite
+*.db
+postgres_data/
+
+# 7. File Uploads 
+**/wwwroot/uploads/
+**/wwwroot/images/
+**/wwwroot/temp/
+
+# 8. Docker Settings
+docker-compose.yml
+docker-compose.override.yml
