@@ -70,8 +70,9 @@ public class CoursesController : ControllerBase
     public async Task<IActionResult> GetStudentsByCourse([FromRoute] int courseId, [FromQuery] QueryParameters queryParams)
     {
         await _courseService.GetByIdAsync(courseId);
-        
-        // Load the page of enrollments and extract student info
+
+        // Force expand=student to populate the Student property via batch gRPC
+        queryParams.Expand = "student";
         var (enrollments, pagination) = await _enrollmentService.GetByCourseIdAsync(courseId, queryParams);
         
         var studentResponses = enrollments
