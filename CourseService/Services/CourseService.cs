@@ -72,9 +72,9 @@ public class CourseService : ICourseService
                     studentMap[s.StudentId] = s;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // Fallback / Log if StudentService is down
+                // Fallback: return courses without student names if StudentService is down
             }
         }
 

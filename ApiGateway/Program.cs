@@ -1,8 +1,17 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using Serilog;
+
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateLogger();
+
+try
+{
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog();
 
 // Configure JWT Authentication
 var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") 
@@ -48,9 +57,21 @@ var app = builder.Build();
 
 app.UseRouting();
 
+app.UseSerilogRequestLogging();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapReverseProxy();
 
 app.Run();
+
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "ApiGateway terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
