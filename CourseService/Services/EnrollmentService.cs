@@ -6,9 +6,11 @@ using PRN232.LMSSystem.CourseService.Models.Query;
 using PRN232.LMSSystem.CourseService.Models.Request;
 using PRN232.LMSSystem.CourseService.Models.Response;
 using PRN232.LMSSystem.Grpc;
+using PRN232.LMSSystem.Messages;
 using GrpcStudentResponse = PRN232.LMSSystem.Grpc.StudentResponse;
 using System.Linq.Expressions;
 using Grpc.Core;
+using MassTransit;
 using Microsoft.Extensions.Caching.Distributed;
 using System.Text.Json;
 
@@ -19,16 +21,19 @@ public class EnrollmentService : IEnrollmentService
     private readonly IEnrollmentRepository _enrollmentRepository;
     private readonly StudentGrpc.StudentGrpcClient _grpcClient;
     private readonly IDistributedCache _cache;
+    private readonly IPublishEndpoint _publishEndpoint;
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
     public EnrollmentService(
         IEnrollmentRepository enrollmentRepository,
         StudentGrpc.StudentGrpcClient grpcClient,
-        IDistributedCache cache)
+        IDistributedCache cache,
+        IPublishEndpoint publishEndpoint)
     {
         _enrollmentRepository = enrollmentRepository;
         _grpcClient = grpcClient;
         _cache = cache;
+        _publishEndpoint = publishEndpoint;
     }
 
     private static string StudentCacheKey(int studentId) => $"student:{studentId}";
@@ -268,6 +273,17 @@ public class EnrollmentService : IEnrollmentService
 
         var loaded = await _enrollmentRepository.GetByIdAsync(enrollment.EnrollmentId, new List<string> { "Course" });
         var studentsMap = await FetchStudentsMapAsync(new[] { enrollment.StudentId });
+
+        await _publishEndpoint.Publish(new EnrollmentCreatedEvent
+        {
+            EnrollmentId = enrollment.EnrollmentId,
+            StudentId = enrollment.StudentId,
+            CourseId = enrollment.CourseId,
+            CourseName = loaded?.Course?.CourseName,
+            EnrollDate = enrollment.EnrollDate,
+            Status = enrollment.Status
+        });
+
         return MapToResponse(loaded ?? enrollment, studentsMap, "student,course");
     }
 
@@ -280,6 +296,8 @@ public class EnrollmentService : IEnrollmentService
         var enrollment = await _enrollmentRepository.GetByIdAsync(id)
             ?? throw new NotFoundException("Enrollment", id);
 
+        var oldStatus = enrollment.Status;
+
         enrollment.StudentId = request.StudentId;
         enrollment.CourseId = request.CourseId;
         enrollment.EnrollDate = DateTime.SpecifyKind(request.EnrollDate, DateTimeKind.Utc);
@@ -287,6 +305,18 @@ public class EnrollmentService : IEnrollmentService
 
         _enrollmentRepository.Update(enrollment);
         await _enrollmentRepository.SaveAsync();
+
+        if (oldStatus != request.Status)
+        {
+            await _publishEndpoint.Publish(new EnrollmentStatusChangedEvent
+            {
+                EnrollmentId = enrollment.EnrollmentId,
+                StudentId = enrollment.StudentId,
+                CourseId = enrollment.CourseId,
+                OldStatus = oldStatus,
+                NewStatus = request.Status
+            });
+        }
     }
 
     public async Task DeleteAsync(int id)

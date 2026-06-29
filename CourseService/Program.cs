@@ -16,6 +16,9 @@ using FluentValidation;
 using Serilog;
 using Polly;
 using Polly.Extensions.Http;
+using MassTransit;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -163,6 +166,29 @@ try
 
     // Register FluentValidation
     builder.Services.AddValidatorsFromAssemblyContaining<SemesterRequestValidator>();
+
+    // Configure MassTransit with RabbitMQ
+    var rabbitHost = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost";
+    builder.Services.AddMassTransit(x =>
+    {
+        x.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host(rabbitHost, "/", h =>
+            {
+                h.Username("guest");
+                h.Password("guest");
+            });
+        });
+    });
+
+    // Configure OpenTelemetry Distributed Tracing
+    var serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "course-service";
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName))
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter());
 
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(options =>

@@ -12,7 +12,11 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using Asp.Versioning;
 using FluentValidation;
+using MassTransit;
+using PRN232.LMSSystem.StudentService.Consumers;
 using Serilog;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -109,6 +113,33 @@ try
 
     // Register FluentValidation
     builder.Services.AddValidatorsFromAssemblyContaining<CreateStudentRequestValidator>();
+
+    // Configure MassTransit with RabbitMQ
+    var rabbitHost = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost";
+    builder.Services.AddMassTransit(x =>
+    {
+        x.AddConsumer<EnrollmentCreatedConsumer>();
+        x.AddConsumer<EnrollmentStatusChangedConsumer>();
+
+        x.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host(rabbitHost, "/", h =>
+            {
+                h.Username("guest");
+                h.Password("guest");
+            });
+            cfg.ConfigureEndpoints(context);
+        });
+    });
+
+    // Configure OpenTelemetry Distributed Tracing
+    var serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "student-service";
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName))
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter());
 
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(options =>

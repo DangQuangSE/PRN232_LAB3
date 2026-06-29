@@ -10,6 +10,8 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using Asp.Versioning;
 using Serilog;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()
@@ -97,6 +99,15 @@ try
     builder.Services.AddScoped<IUserRepository, UserRepository>();
     builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
     builder.Services.AddScoped<IAuthService, AuthService>();
+
+    // Configure OpenTelemetry Distributed Tracing
+    var serviceName = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "identity-service";
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService(serviceName))
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter());
 
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen(options =>
